@@ -1,0 +1,6 @@
+nSamples=40000
+wSize=17
+nChan=8
+gSize=4096
+baseline=1000
+cellSize=5.000000
