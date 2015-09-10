@@ -38,7 +38,6 @@
 using namespace std;
 
 
-void call_opencl(Value*, const Value*, int);
 cl_mem gr, gi, cr, ci;
 cl_command_queue command_queue;
 cl_kernel kernel;
@@ -210,16 +209,6 @@ void Benchmark::gridKernel(const int support,
 
     // Create the OpenCL kernel
     kernel = clCreateKernel(program, "gridkernel", &ret);
-    
-    ret = clSetKernelArg(kernel, 6, sizeof(int), (void *)&s);
-
-    // Set the arguments of the kernel
-    ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)gr);
-    ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)gi);
-    ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)cr);
-    ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)ci);
-
-//cout << sSize << endl;
 
     for (int dind = 0; dind < int(samples.size()); ++dind) {
         if(!(dind%1000)) cout << "Now " << dind << ", Total " << samples.size() << endl;
@@ -235,8 +224,14 @@ void Benchmark::gridKernel(const int support,
             const Value d = samples[dind].data;
             double dr = d.real();
             double di = d.imag();
+            // Set the arguments of the kernel
+            ret = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)gr);
+            ret = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)gi);
+            ret = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)cr);
+            ret = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)ci);
             ret = clSetKernelArg(kernel, 4, sizeof(double), (void *)&dr);
             ret = clSetKernelArg(kernel, 5, sizeof(double), (void *)&di);
+            ret = clSetKernelArg(kernel, 6, sizeof(int), (void *)&s);
             cout << gptr[0] << endl;
 //            cout << d << endl; // OK
             
@@ -245,8 +240,34 @@ void Benchmark::gridKernel(const int support,
                 *(gptr++) += d * (*(cptr++));
             }
 */
-            call_opencl(gptr, cptr, sSize);
+            for(int i=0; i<sSize; i++) {
+                greal[i] = gptr[i].real();
+                gimag[i] = gptr[i].imag();
+                creal[i] = cptr[i].real();
+                cimag[i] = cptr[i].imag();
+            }
+            clEnqueueWriteBuffer(command_queue, gr, false, 0, sSize*sizeof(double), greal, 0, NULL, NULL);
+            clEnqueueWriteBuffer(command_queue, gi, false, 0, sSize*sizeof(double), gimag, 0, NULL, NULL);
+            clEnqueueWriteBuffer(command_queue, cr, false, 0, sSize*sizeof(double), creal, 0, NULL, NULL);
+            clEnqueueWriteBuffer(command_queue, ci, false, 0, sSize*sizeof(double), cimag, 0, NULL, NULL);
             
+            // Execute the OpenCL kernel on the list
+            ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, (const size_t*)&sSize, NULL, 0, NULL, NULL);
+            double *ggi = new double[sSize];
+            double *ggr = new double[sSize];
+            for(int idx=0; idx<sSize; idx++) {
+                ggi[idx] = gimag[idx] + d.real() * cimag[idx] + d.imag() * creal[idx];
+                ggr[idx] = greal[idx] + d.real() * creal[idx] - d.imag() * cimag[idx];
+            }
+
+            clEnqueueReadBuffer(command_queue, gr, false, 0, sSize*sizeof(double), greal, 0, NULL, NULL);
+            clEnqueueReadBuffer(command_queue, gi, false, 0, sSize*sizeof(double), gimag, 0, NULL, NULL);
+
+            for(int i=0; i<sSize; i++) {
+                gptr[i] = Value(greal[i], gimag[i]);
+                cout << ggr[i] << " " << greal[i] << endl;
+                cout << ggi[i] << " " << gimag[i] << endl << endl;
+            }
             gind += gSize;
             cind += sSize;
         }
@@ -259,30 +280,6 @@ void Benchmark::gridKernel(const int support,
     clReleaseMemObject(gi);
     clReleaseMemObject(cr);
     clReleaseMemObject(ci);
-}
-
-void call_opencl(Value* gptr, const Value* cptr, int sSize) {
-    for(int i=0; i<sSize; i++) {
-        greal[i] = gptr[i].real();
-        gimag[i] = gptr[i].imag();
-        creal[i] = cptr[i].real();
-        cimag[i] = cptr[i].imag();
-    }
-
-    clEnqueueWriteBuffer(command_queue, gr, false, 0, sSize*sizeof(double), greal, 0, NULL, NULL);
-    clEnqueueWriteBuffer(command_queue, gi, false, 0, sSize*sizeof(double), gimag, 0, NULL, NULL);
-    clEnqueueWriteBuffer(command_queue, cr, false, 0, sSize*sizeof(double), creal, 0, NULL, NULL);
-    clEnqueueWriteBuffer(command_queue, ci, false, 0, sSize*sizeof(double), cimag, 0, NULL, NULL);
-    
-    // Execute the OpenCL kernel on the list
-    ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, (const size_t*)&sSize, NULL, 0, NULL, NULL);
-
-    clEnqueueReadBuffer(command_queue, gr, false, 0, sSize*sizeof(double), greal, 0, NULL, NULL);
-    clEnqueueReadBuffer(command_queue, gi, false, 0, sSize*sizeof(double), gimag, 0, NULL, NULL);
-
-    for(int i=0; i<sSize; i++) {
-        gptr[i] = Value(greal[i], gimag[i]);
-    }
 }
 
 
